@@ -32,16 +32,16 @@ private:
     /// \brief move will result in figure being hit
     fann_type inputDirectDanger[4];
 
-    /*struct fann* critic;
+    struct fann* critic;
 
     std::vector<std::vector<float> > offsets;
-    std::vector<std::vector<float> > devs;*/
+    std::vector<float> devs;  ///< devations are the same for a specific input regardless of offset
 
     float reward[4];
 
 
     int make_decision();
-    void runActor();
+    void runCritic();
 
 
 public:

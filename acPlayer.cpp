@@ -1,6 +1,7 @@
 #include "acPlayer.h"
 
-acPlayer::acPlayer() : newGame(true){
+acPlayer::acPlayer() : newGame(true)
+{
 
 
     // ACTORS
@@ -13,13 +14,16 @@ acPlayer::acPlayer() : newGame(true){
         actor[i] = fann_create_standard(num_layers, num_input, num_output);
         fann_set_activation_function_output(actor[i], FANN_LINEAR);
 
-        fann_set_weight(actor[i], 0, 6, 200.f); // inputStart
+        /*fann_set_weight(actor[i], 0, 6, 200.f); // inputStart
         fann_set_weight(actor[i], 1, 6, 2.f); // inputProgess
         fann_set_weight(actor[i], 2, 6, -1000.f); // inputFinishFail
         fann_set_weight(actor[i], 3, 6, -60.f); // inputDangerChange
         fann_set_weight(actor[i], 4, 6, -1000.f); // inputDirectDanger
         fann_set_weight(actor[i], 5, 6, 0);
-
+        */
+        fann_set_weight(actor[i], 0, 4, 200.f); // inputStart
+        fann_set_weight(actor[i], 1, 4, 0); // inputProgess
+        fann_set_weight(actor[i], 2, 4, 0); // inputDangerChange
     }
 
 
@@ -30,6 +34,56 @@ acPlayer::acPlayer() : newGame(true){
     // CRITIC
 
 
+
+    offsets = { {0, -35.f}, {-1.f, 0} }; //inputProgress, inputDangerChange
+    devs = {30.f, 0.1f};
+
+    int tmp = 0;
+    for(auto offset : offsets)
+    {
+        tmp += offset.size();
+    }
+    const unsigned int numInputs = tmp;
+
+    tmp = 1;
+    for(auto offset : offsets)
+    {
+        tmp *= offset.size();
+    }
+
+    const unsigned int numMid = tmp;
+    const unsigned int numOutput = 1;
+    const unsigned int numLayers = 3;
+
+    critic = fann_create_sparse(1, numLayers, numInputs, numMid, numOutput);
+    fann_randomize_weights(critic, 0, 0);
+
+    fann_print_connections(critic);
+
+    int inputNeuronsPassed = 0;
+    size_t midNeuronSkipCounter = 1;
+    for(size_t i = 0; i < offsets.size(); ++i)
+    {
+        for(size_t j = 0; j < offsets[i].size(); ++j)
+        {
+            int iter = j + offsets[i].size(); // + offsets[i].size() jut to make sure number is higher or equal to modulo
+            for(size_t k = numInputs; k < numInputs + numMid; k += midNeuronSkipCounter)
+            {
+                if(iter % offsets[i].size() == 0)
+                {
+                    for(size_t l = 0; l < midNeuronSkipCounter; ++l)
+                    {
+                        fann_set_weight(critic, inputNeuronsPassed, k + 1 + l, 1.f);
+                    }
+                }
+                ++iter;
+            }
+            ++inputNeuronsPassed;
+        }
+        midNeuronSkipCounter *= offsets[i].size();
+    }
+
+    fann_print_connections(critic);
 
     // ----------------------------------------------------------------------
 
@@ -93,7 +147,7 @@ int acPlayer::make_decision(){
 
         // CHECK DANGER OF NEARBY ENEMY FIGURES
         fann_type danger = 0;
-        for(size_t j = 4; j < 16; ++j)
+        for(size_t j = 4; j < 16; ++j) // current danger
         {
             // AND NOT ON SAFE
             int pos = posStart[j];
@@ -117,7 +171,7 @@ int acPlayer::make_decision(){
             }
         }
         fann_type nextDanger = 0;
-        for(size_t j = 4; j < 16; ++j)
+        for(size_t j = 4; j < 16; ++j) // would-be danger
         {
             int pos = posStart[j];
             bool safe = (myPos == 0);
@@ -159,7 +213,8 @@ int acPlayer::make_decision(){
 
         // -------------------------------------
 
-        fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
+        //fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
+        fann_type inputs[3] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]]};
         fann_type* output = fann_run(actor[eligible[i]], inputs);
         if(output[0] > bestOutput)
         {
@@ -237,7 +292,7 @@ int acPlayer::make_decision(){
 
 }
 
-void acPlayer::runActor()
+void acPlayer::runCritic()
 {
     /*Eigen::Vector4f vec;
     vec << 1.1f, 2.f, 3.f, 4.f;
@@ -272,7 +327,7 @@ void acPlayer::start_turn(positions_and_dice relative){
     }
     std::cout << std::endl << reward[0] << " " << reward[1] << " " << reward[2] << " " << reward[3] << " ";
     fflush(stdin);
-    runActor();
+    runCritic();
 
     dice_roll = relative.dice;
     int decision = make_decision();
