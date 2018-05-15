@@ -5,7 +5,7 @@ acPlayer::acPlayer() : newGame(true)
 
 
     // ACTORS
-    const unsigned int num_input = 5;
+    const unsigned int num_input = 3;
     const unsigned int num_output = 1;
     const unsigned int num_layers = 2;
 
@@ -26,6 +26,9 @@ acPlayer::acPlayer() : newGame(true)
         fann_set_weight(actor[i], 2, 4, 0); // inputDangerChange
     }
 
+    inputWeightVec = {0, 0};
+
+
 
     fann_print_connections(actor[0]);
 
@@ -35,32 +38,20 @@ acPlayer::acPlayer() : newGame(true)
 
 
 
-    offsets = { {0, -35.f}, {-1.f, 0} }; //inputProgress, inputDangerChange
-    devs = {30.f, 0.1f};
-
-    int tmp = 0;
-    for(auto offset : offsets)
+    /*for(auto offset : offsets)
     {
         tmp += offset.size();
     }
-    const unsigned int numInputs = tmp;
+    numInputs = tmp;*/
 
-    tmp = 1;
-    for(auto offset : offsets)
-    {
-        tmp *= offset.size();
-    }
 
-    const unsigned int numMid = tmp;
-    const unsigned int numOutput = 1;
-    const unsigned int numLayers = 3;
 
-    critic = fann_create_sparse(1, numLayers, numInputs, numMid, numOutput);
+    /*critic = fann_create_sparse(1, numLayers, numInputs, numMid, numOutput);
     fann_randomize_weights(critic, 0, 0);
 
-    fann_print_connections(critic);
+    fann_print_connections(critic);*/
 
-    int inputNeuronsPassed = 0;
+    /*int inputNeuronsPassed = 0;
     size_t midNeuronSkipCounter = 1;
     for(size_t i = 0; i < offsets.size(); ++i)
     {
@@ -83,7 +74,76 @@ acPlayer::acPlayer() : newGame(true)
         midNeuronSkipCounter *= offsets[i].size();
     }
 
-    fann_print_connections(critic);
+    fann_print_connections(critic);*/
+
+
+    offsets = { {0, 50.f}, {1.f, 0} }; //inputProgress, inputDangerChange
+    devs = {5.f, 0.1f};
+
+    S = Eigen::MatrixXf::Zero(2, 2);
+    for(size_t i = 0; i < devs.size(); ++i)
+    {
+        S(i, i) = devs[i]*devs[i];  // ?????????????????
+    }
+    S = S.inverse();
+    std::cout << S << std::endl;
+    fflush(stdin);
+
+    prevV = 0;
+
+    numInputs = offsets.size();
+
+    for(size_t i = 0; i < 4; ++i)
+    {
+        for(size_t j = 0; j < numInputs; ++j)
+        {
+            lastInputVec[i].push_back(0);
+        }
+    }
+
+    int tmp = 1;
+
+    for(auto offset : offsets)
+    {
+        tmp *= offset.size();
+    }
+
+    numMid = tmp;
+    const unsigned int numOutput = 1;
+    const unsigned int numLayers = 3;
+
+
+    for(size_t i = 0; i < numMid; ++i)
+    {
+        midNeurons.push_back(MidNeuron());
+        midNeurons.back().offsetVec.resize(offsets.size());
+    }
+
+    int inputNeuronsPassed = 0;
+    size_t midNeuronSkipCounter = 1;
+    for(size_t i = 0; i < offsets.size(); ++i)
+    {
+        for(size_t j = 0; j < offsets[i].size(); ++j)
+        {
+            int iter = j + offsets[i].size(); // + offsets[i].size() jut to make sure number is higher or equal to modulo
+            for(size_t k = 0; k < numMid; k += midNeuronSkipCounter)
+            {
+                if(iter % offsets[i].size() == 0)
+                {
+                    for(size_t l = 0; l < midNeuronSkipCounter; ++l)
+                    {
+                        //fann_set_weight(critic, inputNeuronsPassed, k + 1 + l, 1.f);
+                        midNeurons[k + l].offsetVec[i] = offsets[i][j];
+                    }
+                }
+                ++iter;
+            }
+            ++inputNeuronsPassed;
+        }
+        midNeuronSkipCounter *= offsets[i].size();
+    }
+
+    printMidNeurons();
 
     // ----------------------------------------------------------------------
 
@@ -91,6 +151,20 @@ acPlayer::acPlayer() : newGame(true)
 
 
 
+}
+
+void acPlayer::printMidNeurons()
+{
+    std::cout << "\nNum: " << midNeurons.size();
+
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        std::cout << std::endl << "weight: " << midNeurons[i].weight << "   ";
+        for(size_t j = 0; j < midNeurons[i].offsetVec.size(); ++j)
+        {
+            std::cout << " " << midNeurons[i].offsetVec[j];
+        }
+    }
 }
 
 bool acPlayer::isEnemyOnZone(int position)
@@ -118,7 +192,15 @@ int acPlayer::make_decision(){
             eligible.push_back(i);
         }
     }
-    //printf("%i: ", dice_roll);
+
+    // reset lastInputVec
+    for(size_t i = 0; i < 4; ++i)
+    {
+        for(size_t j = 0; j < lastInputVec[i].size(); ++j)
+        {
+            lastInputVec[i][j] = 0;
+        }
+    }
 
     fann_type bestOutput = -9999.f;
     size_t bestIndex = -1;
@@ -127,7 +209,6 @@ int acPlayer::make_decision(){
         int myPos = posStart[eligible[i]];
         // initialize inputs
         inputProgress[eligible[i]] = myPos;
-        //inputDistChange[eligible[i]] = dice_roll;
         if(myPos == -1)
         {
             inputStart[eligible[i]] = 1;
@@ -151,7 +232,7 @@ int acPlayer::make_decision(){
         {
             // AND NOT ON SAFE
             int pos = posStart[j];
-            bool safe = (myPos == 0);
+            bool safe = (myPos == 0 || myPos > 50);
             if(safe)
             {
                 //no danger
@@ -167,14 +248,14 @@ int acPlayer::make_decision(){
             }
             else if((pos < myPos) && (pos > (myPos - 5)))
             {
-                danger = 1;
+                danger = 0; // 1 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             }
         }
         fann_type nextDanger = 0;
         for(size_t j = 4; j < 16; ++j) // would-be danger
         {
             int pos = posStart[j];
-            bool safe = (myPos == 0);
+            bool safe = (myPos == 0 || myPos > 50);
             if(safe)
             {
                 // no danger
@@ -214,6 +295,7 @@ int acPlayer::make_decision(){
         // -------------------------------------
 
         //fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
+        lastInputVec[eligible[i]] = {inputProgress[eligible[i]], inputDangerChange[eligible[i]]};
         fann_type inputs[3] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]]};
         fann_type* output = fann_run(actor[eligible[i]], inputs);
         if(output[0] > bestOutput)
@@ -300,6 +382,82 @@ void acPlayer::runCritic()
     std::cout << std::endl << vec.format(CleanFmt) << std::endl;
     fflush(stdin);*/
 
+    std::vector<float> y_j;
+    std::vector<float> a_j;
+
+    Eigen::VectorXf x(numInputs);
+    for(size_t i = 0; i < numInputs; ++i)
+    {
+        x[i] = lastInputVec[0][i];
+    }
+
+
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        Eigen::VectorXf c(numInputs);
+        for(size_t j = 0; j < midNeurons[i].offsetVec.size(); ++j)
+        {
+            c[j] = midNeurons[i].offsetVec[j];
+        }
+        //x = x - c;
+        Eigen::VectorXf tmp = S*(x - c);
+        a_j.push_back(std::exp(-tmp.squaredNorm()));
+        //std::cout << std::endl << a_j << std::endl;
+        //fflush(stdin);
+    }
+
+    float sum_a_j = 0;
+    for(auto a : a_j)
+    {
+        sum_a_j += a;
+    }
+
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        y_j.push_back(a_j[i]/sum_a_j);
+        //std::cout << std::endl << y_j[i] << std::endl;
+        //fflush(stdin);
+    }
+
+    std::vector<float> v_j;
+    float V = 0;
+
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        v_j.push_back(midNeurons[i].weight);
+        V += v_j[i]*y_j[i];
+    }
+
+
+
+    float delta = reward[0] + V - prevV;
+    prevV = V;
+    std::vector<float> dw;
+    for(size_t i = 0; i < numInputs; ++i)
+    {
+        dw.push_back(0.5*delta*x[i]);
+    }
+    for(size_t i = 0; i < inputWeightVec.size(); ++i)
+    {
+        inputWeightVec[i] -= dw[i];
+    }
+
+    for(int i = 0; i < 4; ++i)
+    {
+
+        fann_set_weight(actor[i], 1, 4, inputWeightVec[0]); // inputProgess
+        fann_set_weight(actor[i], 2, 4, inputWeightVec[1]); // inputDangerChange
+    }
+    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << std::endl;
+    fflush(stdin);
+
+    std::vector<float> dv;
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        dv.push_back(0.5*delta*y_j[i]);
+        midNeurons[i].weight += dv[i];
+    }
+
 }
 
 void acPlayer::start_turn(positions_and_dice relative){
@@ -315,7 +473,7 @@ void acPlayer::start_turn(positions_and_dice relative){
     std::vector<int> posStartPrev(posStart);
     posStart = relative.pos;
 
-    // punish if a figure was sent home since last state
+    // punish if a figure was sent home since last state, reward if it finished
     for(int i = 0; i < 4; ++i)
     {
         // first, reset in every turn
@@ -324,13 +482,19 @@ void acPlayer::start_turn(positions_and_dice relative){
         {
             reward[i] += -1.f;
         }
+        if(posStart[i] == 99 && posStartPrev[i] != 99)
+        {
+            reward[i] += 5.f;
+            std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        }
     }
-    std::cout << std::endl << reward[0] << " " << reward[1] << " " << reward[2] << " " << reward[3] << " ";
-    fflush(stdin);
+    //std::cout << std::endl << reward[0] << " " << reward[1] << " " << reward[2] << " " << reward[3] << " ";
+    //fflush(stdin);
     runCritic();
 
     dice_roll = relative.dice;
     int decision = make_decision();
+    lastMovedPiece = decision;
     emit select_piece(decision);
 }
 

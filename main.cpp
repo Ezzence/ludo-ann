@@ -19,7 +19,7 @@ int main(int argc, char *argv[]){
     acPlayer p5;
 
     game g;
-    g.setGameDelay(301); //if you want to see the game, set a delay
+    g.setGameDelay(000); //301 if you want to see the game, set a delay
 
     //* Add a GUI <-- remove the '/' to uncomment block
     Dialog w;
@@ -64,7 +64,7 @@ int main(int argc, char *argv[]){
         }
         for(int j = 0; j < 4; ++j)
         {
-            std::cout << std::endl << (float)std::count(g.winList.begin(), g.winList.end(), j)/g.winList.size();
+            std::cout << std::endl << i << " " << (float)std::count(g.winList.begin(), g.winList.end(), j)/g.winList.size();
         }
         std::cout << std::endl;
         //fflush(stdin);
