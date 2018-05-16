@@ -1,6 +1,10 @@
 #include "acPlayer.h"
 
-acPlayer::acPlayer() : newGame(true)
+#define V_MAX 0
+#define V_MIN -6
+#define LEARNING_RATE 0.5f
+
+acPlayer::acPlayer() : gaussDistribution(0, 1.f), newGame(true)
 {
 
 
@@ -117,6 +121,7 @@ acPlayer::acPlayer() : newGame(true)
     {
         midNeurons.push_back(MidNeuron());
         midNeurons.back().offsetVec.resize(offsets.size());
+        midNeurons.back().weight = 0;
     }
 
     int inputNeuronsPassed = 0;
@@ -132,7 +137,6 @@ acPlayer::acPlayer() : newGame(true)
                 {
                     for(size_t l = 0; l < midNeuronSkipCounter; ++l)
                     {
-                        //fann_set_weight(critic, inputNeuronsPassed, k + 1 + l, 1.f);
                         midNeurons[k + l].offsetVec[i] = offsets[i][j];
                     }
                 }
@@ -232,7 +236,7 @@ int acPlayer::make_decision(){
         {
             // AND NOT ON SAFE
             int pos = posStart[j];
-            bool safe = (myPos == 0 || myPos > 50);
+            bool safe = (myPos == -1 || myPos == 0 || myPos > 50);
             if(safe)
             {
                 //no danger
@@ -248,14 +252,14 @@ int acPlayer::make_decision(){
             }
             else if((pos < myPos) && (pos > (myPos - 5)))
             {
-                danger = 0; // 1 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                danger += 1; // 1 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             }
         }
         fann_type nextDanger = 0;
         for(size_t j = 4; j < 16; ++j) // would-be danger
         {
             int pos = posStart[j];
-            bool safe = (myPos == 0 || myPos > 50);
+            bool safe = (myPos == -1 || myPos == 0 || myPos > 50);
             if(safe)
             {
                 // no danger
@@ -271,14 +275,26 @@ int acPlayer::make_decision(){
             }
             else if((pos < (myPos + dice_roll)) && (pos > (myPos + dice_roll - 5)))
             {
-                nextDanger = 1;
+                nextDanger += 1;
+            }
+        }
+        // CHECK DIRECT DANGER
+        std::vector<int> allSafeZones = {13, 26, 39};
+        for(size_t j = 0; j < allSafeZones.size(); ++j)
+        {
+            if(myPos + dice_roll == allSafeZones[j])
+            {
+                if(isEnemyOnZone(allSafeZones[j]))
+                {
+                    nextDanger += 6;
+                }
             }
         }
         inputDangerChange[eligible[i]] = nextDanger - danger;
         // -----------------------------------------------------
 
-        // CHECK DIRECT DANGER
-        inputDirectDanger[eligible[i]] = 0;
+        // CHECK DIRECT DANGER (EDIT: copied to dangerChange)
+        /*inputDirectDanger[eligible[i]] = 0;
         std::vector<int> allSafeZones = {13, 26, 39};
         for(size_t j = 0; j < allSafeZones.size(); ++j)
         {
@@ -289,15 +305,19 @@ int acPlayer::make_decision(){
                     inputDirectDanger[eligible[i]] = 1;
                 }
             }
-        }
+        }*/
 
 
         // -------------------------------------
 
         //fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
-        lastInputVec[eligible[i]] = {inputProgress[eligible[i]], inputDangerChange[eligible[i]]};
+        lastInputVec[eligible[i]] = {0, inputDangerChange[eligible[i]]};
         fann_type inputs[3] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]]};
         fann_type* output = fann_run(actor[eligible[i]], inputs);
+        if(eligible[i] == 0)
+        {
+            output[0] += epsilon;   // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        }
         if(output[0] > bestOutput)
         {
             bestOutput= output[0];
@@ -414,8 +434,15 @@ void acPlayer::runCritic()
 
     for(size_t i = 0; i < midNeurons.size(); ++i)
     {
-        y_j.push_back(a_j[i]/sum_a_j);
-        //std::cout << std::endl << y_j[i] << std::endl;
+        if(sum_a_j > 0)
+        {
+            y_j.push_back(a_j[i]/sum_a_j);
+        }
+        else
+        {
+            y_j.push_back(0);
+        }
+        //std::cout << std::endl << sum_a_j << std::endl;
         //fflush(stdin);
     }
 
@@ -428,18 +455,20 @@ void acPlayer::runCritic()
         V += v_j[i]*y_j[i];
     }
 
+    float gaussNoise = gaussDistribution(generator);
+    epsilon = 10*gaussNoise*std::min(1.f, std::max(0.f, (V_MAX - V)/(V_MAX - V_MIN)));
 
-
-    float delta = reward[0] + V - prevV;
+    float delta = reward[0] - V + prevV;
     prevV = V;
+
     std::vector<float> dw;
     for(size_t i = 0; i < numInputs; ++i)
     {
-        dw.push_back(0.5*delta*x[i]);
+        dw.push_back(LEARNING_RATE*epsilon*delta*x[i]);
     }
     for(size_t i = 0; i < inputWeightVec.size(); ++i)
     {
-        inputWeightVec[i] -= dw[i];
+        inputWeightVec[i] += dw[i];
     }
 
     for(int i = 0; i < 4; ++i)
@@ -448,13 +477,13 @@ void acPlayer::runCritic()
         fann_set_weight(actor[i], 1, 4, inputWeightVec[0]); // inputProgess
         fann_set_weight(actor[i], 2, 4, inputWeightVec[1]); // inputDangerChange
     }
-    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << std::endl;
+    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << "    " << V << std::endl;
     fflush(stdin);
 
     std::vector<float> dv;
     for(size_t i = 0; i < midNeurons.size(); ++i)
     {
-        dv.push_back(0.5*delta*y_j[i]);
+        dv.push_back(LEARNING_RATE*delta*y_j[i]);
         midNeurons[i].weight += dv[i];
     }
 
@@ -474,18 +503,35 @@ void acPlayer::start_turn(positions_and_dice relative){
     posStart = relative.pos;
 
     // punish if a figure was sent home since last state, reward if it finished
-    for(int i = 0; i < 4; ++i)
+    for(size_t i = 0; i < 4; ++i)
     {
         // first, reset in every turn
         reward[i] = 0;
         if(posStart[i] == -1 && posStartPrev[i] != -1)
         {
-            reward[i] += -1.f;
+            bool missedBetterChoice = false;
+            for(size_t j = 0; j < 4; ++j)
+            {
+                if(j == i)
+                {
+                    continue;
+                }
+                if(posStartPrev[j] > -1 && lastInputVec[j][1] < lastInputVec[i][1])     // INDEX !!!!!!!!!! (danger input)
+                {
+                    // means another figure was available without danger
+                    missedBetterChoice = true;
+                }
+            }
+
+            if(missedBetterChoice)
+            {
+                reward[i] += -1.f;
+            }
         }
         if(posStart[i] == 99 && posStartPrev[i] != 99)
         {
-            reward[i] += 5.f;
-            std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+            //reward[i] += 5.f;
+            //std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         }
     }
     //std::cout << std::endl << reward[0] << " " << reward[1] << " " << reward[2] << " " << reward[3] << " ";

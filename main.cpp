@@ -54,7 +54,7 @@ int main(int argc, char *argv[]){
     QObject::connect(&g, SIGNAL(player4_end(std::vector<int>)),    &p5,SLOT(post_game_analysis(std::vector<int>)));
     QObject::connect(&p5,SIGNAL(turn_complete(bool)),              &g, SLOT(turnComplete(bool)));
 
-    for(int i = 0; i < 10000; ++i){
+    for(int i = 0; i < 1000; ++i){
         g.start();
         a.exec();
         g.reset();

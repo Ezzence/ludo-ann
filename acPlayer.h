@@ -2,6 +2,7 @@
 #define AC_PLAYER_H
 #include <QObject>
 #include <iostream>
+#include <random>
 #include "positions_and_dice.h"
 
 #include "floatfann.h"
@@ -53,6 +54,10 @@ private:
     std::vector<float> devs;  ///< devations are the same for a specific input regardless of offset
     Eigen::MatrixXf S;          ///< diagonal matrix of variances
     std::vector<MidNeuron> midNeurons;
+
+    std::default_random_engine generator;
+    std::normal_distribution<float> gaussDistribution;
+    float epsilon; ///< result of V and random noise
 
     float prevV;
 
