@@ -1,15 +1,15 @@
 #include "acPlayer.h"
 
-#define V_MAX 0
+#define V_MAX 1
 #define V_MIN -6
 #define LEARNING_RATE 0.5f
 
-acPlayer::acPlayer() : gaussDistribution(0, 1.f), newGame(true)
+acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
 {
 
 
     // ACTORS
-    const unsigned int num_input = 3;
+    const unsigned int num_input = 4;
     const unsigned int num_output = 1;
     const unsigned int num_layers = 2;
 
@@ -25,12 +25,14 @@ acPlayer::acPlayer() : gaussDistribution(0, 1.f), newGame(true)
         fann_set_weight(actor[i], 4, 6, -1000.f); // inputDirectDanger
         fann_set_weight(actor[i], 5, 6, 0);
         */
-        fann_set_weight(actor[i], 0, 4, 200.f); // inputStart
-        fann_set_weight(actor[i], 1, 4, 0); // inputProgess
-        fann_set_weight(actor[i], 2, 4, 0); // inputDangerChange
+        fann_set_weight(actor[i], 0, 5, 200.f); // inputStart
+        fann_set_weight(actor[i], 1, 5, 0.f); // inputProgess
+        fann_set_weight(actor[i], 2, 5, 0.f); // inputDangerChange
+        fann_set_weight(actor[i], 3, 5, 0.f); // inputFinishFail
+        fann_set_weight(actor[i], 4, 5, 0.f);
     }
 
-    inputWeightVec = {0, 0};
+    inputWeightVec = {0, 0, 0, 0};
 
 
 
@@ -81,10 +83,10 @@ acPlayer::acPlayer() : gaussDistribution(0, 1.f), newGame(true)
     fann_print_connections(critic);*/
 
 
-    offsets = { {0, 50.f}, {1.f, 0} }; //inputProgress, inputDangerChange
-    devs = {5.f, 0.1f};
+    offsets = { {0.f, 1.f}, {0.f, 50.f}, {-6.f, 0.f, 6.f}, {0.f, 1.f} }; //inputProgress, inputDangerChange
+    devs = {0.2f, 5.f, 1.f, 0.2f};
 
-    S = Eigen::MatrixXf::Zero(2, 2);
+    S = Eigen::MatrixXf::Zero(devs.size(), devs.size());
     for(size_t i = 0; i < devs.size(); ++i)
     {
         S(i, i) = devs[i]*devs[i];  // ?????????????????
@@ -191,7 +193,7 @@ int acPlayer::make_decision(){
     // set which figures are eligible to move with the current dice roll
     for(int i = 0; i < 4; ++i)
     {
-        if(!(posStart[i] == 99 || (posStart[i] == -1 && dice_roll != 6)))
+        if(!(posStart[i] == 99 || (posStart[i] == -1 && diceRoll != 6)))
         {
             eligible.push_back(i);
         }
@@ -206,7 +208,7 @@ int acPlayer::make_decision(){
         }
     }
 
-    fann_type bestOutput = -9999.f;
+    fann_type bestOutput = -99999.f;
     size_t bestIndex = -1;
     for(size_t i = 0; i < eligible.size(); ++i)
     {
@@ -215,13 +217,13 @@ int acPlayer::make_decision(){
         inputProgress[eligible[i]] = myPos;
         if(myPos == -1)
         {
-            inputStart[eligible[i]] = 1;
+            inputStart[eligible[i]] = 1.f;
         }
         else
         {
             inputStart[eligible[i]] = 0;
         }
-        if(myPos > 50 && ((myPos + dice_roll) != 56))
+        if(myPos > 50 && ((myPos + diceRoll) > 56))
         {
             inputFinishFail[eligible[i]] = 1.f;
         }
@@ -273,7 +275,7 @@ int acPlayer::make_decision(){
                 // wrap around enemy position
                 pos -= 52;
             }
-            else if((pos < (myPos + dice_roll)) && (pos > (myPos + dice_roll - 5)))
+            else if((pos < (myPos + diceRoll)) && (pos > (myPos + diceRoll - 5)))
             {
                 nextDanger += 1;
             }
@@ -282,7 +284,7 @@ int acPlayer::make_decision(){
         std::vector<int> allSafeZones = {13, 26, 39};
         for(size_t j = 0; j < allSafeZones.size(); ++j)
         {
-            if(myPos + dice_roll == allSafeZones[j])
+            if(myPos + diceRoll == allSafeZones[j])
             {
                 if(isEnemyOnZone(allSafeZones[j]))
                 {
@@ -311,8 +313,8 @@ int acPlayer::make_decision(){
         // -------------------------------------
 
         //fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
-        lastInputVec[eligible[i]] = {0, inputDangerChange[eligible[i]]};
-        fann_type inputs[3] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]]};
+        lastInputVec[eligible[i]] = {0, 0, inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
+        fann_type inputs[4] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
         fann_type* output = fann_run(actor[eligible[i]], inputs);
         if(eligible[i] == 0)
         {
@@ -442,8 +444,6 @@ void acPlayer::runCritic()
         {
             y_j.push_back(0);
         }
-        //std::cout << std::endl << sum_a_j << std::endl;
-        //fflush(stdin);
     }
 
     std::vector<float> v_j;
@@ -474,10 +474,12 @@ void acPlayer::runCritic()
     for(int i = 0; i < 4; ++i)
     {
 
-        fann_set_weight(actor[i], 1, 4, inputWeightVec[0]); // inputProgess
-        fann_set_weight(actor[i], 2, 4, inputWeightVec[1]); // inputDangerChange
+        //fann_set_weight(actor[i], 0, 5, inputWeightVec[0]); // inputStart
+        fann_set_weight(actor[i], 1, 5, inputWeightVec[1]); // inputProgess
+        fann_set_weight(actor[i], 2, 5, inputWeightVec[2]); // inputDangerChange
+        fann_set_weight(actor[i], 3, 5, inputWeightVec[3]); // inputFinishFail
     }
-    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << "    " << V << std::endl;
+    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << " " << inputWeightVec[2] << " " << inputWeightVec[3] << "    " << V << std::endl;
     fflush(stdin);
 
     std::vector<float> dv;
@@ -502,12 +504,14 @@ void acPlayer::start_turn(positions_and_dice relative){
     std::vector<int> posStartPrev(posStart);
     posStart = relative.pos;
 
-    // punish if a figure was sent home since last state, reward if it finished
+    // give rewards
     for(size_t i = 0; i < 4; ++i)
     {
         // first, reset in every turn
         reward[i] = 0;
-        if(posStart[i] == -1 && posStartPrev[i] != -1)
+
+        // punish if a figure was sent home and there could have been a better choice
+        if(posStart[i] == -1 && posStartPrev[i] != -1 && lastDecision == i)
         {
             bool missedBetterChoice = false;
             for(size_t j = 0; j < 4; ++j)
@@ -516,7 +520,7 @@ void acPlayer::start_turn(positions_and_dice relative){
                 {
                     continue;
                 }
-                if(posStartPrev[j] > -1 && lastInputVec[j][1] < lastInputVec[i][1])     // INDEX !!!!!!!!!! (danger input)
+                if( (diceRoll == 6 && posStartPrev[j] == -1) || (posStartPrev[j] > -1 && posStartPrev[j] < 99 && inputDangerChange[j] < inputDangerChange[i]))     // INDEX !!!!!!!!!! (danger input)
                 {
                     // means another figure was available without danger
                     missedBetterChoice = true;
@@ -528,20 +532,48 @@ void acPlayer::start_turn(positions_and_dice relative){
                 reward[i] += -1.f;
             }
         }
-        if(posStart[i] == 99 && posStartPrev[i] != 99)
+
+        // punish for missing finish
+        //if(posStartPrev[i] > 50 && (posStart[i] < posStartPrev[i] + diceRoll) && lastDecision == i)
+        if(inputFinishFail[i] > 0.1f && lastDecision == i)
         {
-            //reward[i] += 5.f;
-            //std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+            /*bool missedBetterChoice = false;
+            for(size_t j = 0; j < 4; ++j)
+            {
+                if(j == i)
+                {
+                    continue;
+                }
+                //if( (posStartPrev[j] == -1 && diceRoll == 6) || (posStartPrev[j] > -1 && posStartPrev[j] < 51) )
+                if( (diceRoll == 6 && posStartPrev[j] == -1) || (posStartPrev[j] > -1 && posStartPrev[j] < 50 && inputDangerChange[j] < 0.1f) )
+                {
+                    missedBetterChoice = true;
+                }
+
+                if(missedBetterChoice)
+                {*/
+                    reward[i] += -0.1f;
+                //}
+            //}
         }
+
+        /*if(posStart[i] == 99 && posStartPrev[i] != 99)
+        {
+            reward[i] += 1.f;
+            //std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        }*/
     }
     //std::cout << std::endl << reward[0] << " " << reward[1] << " " << reward[2] << " " << reward[3] << " ";
     //fflush(stdin);
-    runCritic();
+    if(!newGame)
+    {
+        runCritic();
+    }
 
-    dice_roll = relative.dice;
-    int decision = make_decision();
-    lastMovedPiece = decision;
-    emit select_piece(decision);
+    //lastDiceRoll = diceRoll;
+    diceRoll = relative.dice;
+    lastDecision = make_decision();
+    emit select_piece(lastDecision);
 }
 
 void acPlayer::post_game_analysis(std::vector<int> relative_pos){

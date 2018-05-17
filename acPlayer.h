@@ -25,7 +25,9 @@ private:
     std::vector<int> posStart;
     //std::vector<int> posStartPrev;
     std::vector<int> posEnd;
-    int dice_roll;
+    int diceRoll;
+    int lastDiceRoll;
+    size_t lastDecision;
 
     struct fann* actor[4];
 
@@ -46,7 +48,6 @@ private:
     std::vector<float> inputWeightVec;
 
     std::vector<float> lastInputVec[4];
-    int lastMovedPiece;
 
     struct fann* critic;
 

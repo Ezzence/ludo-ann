@@ -14,7 +14,7 @@ int main(int argc, char *argv[]){
     qRegisterMetaType<positions_and_dice>();
 
     //instanciate the players here
-    ludo_player p1, p2;
+    ludo_player_random p1, p2;
     ludo_player_random p3, p4;
     acPlayer p5;
 
@@ -55,6 +55,7 @@ int main(int argc, char *argv[]){
     QObject::connect(&p5,SIGNAL(turn_complete(bool)),              &g, SLOT(turnComplete(bool)));
 
     for(int i = 0; i < 1000; ++i){
+        p5.newGame = true;
         g.start();
         a.exec();
         g.reset();
