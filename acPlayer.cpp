@@ -1,10 +1,10 @@
 #include "acPlayer.h"
 
-#define V_MAX 1
-#define V_MIN -6
+#define V_MAX 1.f
+#define V_MIN -1.f
 #define LEARNING_RATE 0.5f
 
-acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
+acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), prevV(0), newGame(true)
 {
 
 
@@ -25,7 +25,7 @@ acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
         fann_set_weight(actor[i], 4, 6, -1000.f); // inputDirectDanger
         fann_set_weight(actor[i], 5, 6, 0);
         */
-        fann_set_weight(actor[i], 0, 5, 200.f); // inputStart
+        fann_set_weight(actor[i], 0, 5, 0.f); // inputStart
         fann_set_weight(actor[i], 1, 5, 0.f); // inputProgess
         fann_set_weight(actor[i], 2, 5, 0.f); // inputDangerChange
         fann_set_weight(actor[i], 3, 5, 0.f); // inputFinishFail
@@ -83,7 +83,7 @@ acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
     fann_print_connections(critic);*/
 
 
-    offsets = { {0.f, 1.f}, {0.f, 50.f}, {-6.f, 0.f, 6.f}, {0.f, 1.f} }; //inputProgress, inputDangerChange
+    offsets = { {0.f, 1.f}, {0.f, 50.f}, {-6.f, 0.f, 6.f}, {0.f, 1.f} }; //inputStart, inputProgress, inputDangerChange, inputFinishFail
     devs = {0.2f, 5.f, 1.f, 0.2f};
 
     S = Eigen::MatrixXf::Zero(devs.size(), devs.size());
@@ -104,6 +104,7 @@ acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
         for(size_t j = 0; j < numInputs; ++j)
         {
             lastInputVec[i].push_back(0);
+            prevInputVec[i].push_back(0);
         }
     }
 
@@ -199,11 +200,12 @@ int acPlayer::make_decision(){
         }
     }
 
-    // reset lastInputVec
+    // save and reset lastInputVec
     for(size_t i = 0; i < 4; ++i)
     {
         for(size_t j = 0; j < lastInputVec[i].size(); ++j)
         {
+            prevInputVec[i][j] = lastInputVec[i][j];
             lastInputVec[i][j] = 0;
         }
     }
@@ -313,7 +315,7 @@ int acPlayer::make_decision(){
         // -------------------------------------
 
         //fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
-        lastInputVec[eligible[i]] = {0, 0, inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
+        lastInputVec[eligible[i]] = {inputStart[eligible[i]], 0, inputDangerChange[eligible[i]], 0};
         fann_type inputs[4] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
         fann_type* output = fann_run(actor[eligible[i]], inputs);
         if(eligible[i] == 0)
@@ -339,61 +341,6 @@ int acPlayer::make_decision(){
 
     return bestIndex;
 
-    /*for(int i = 0; i < 4; ++i)
-    {
-        if(disqualified[i] == true)
-        {
-            continue;
-        }
-        inputGoalDist[i] = pos_start_of_turn[i] + 1;
-        if(pos_start_of_turn[i] == -1)
-        {
-            inputStart[i] = 1;
-        }
-        else
-        {
-            inputStart[i] = 0;
-        }
-    }
-
-
-    printf("\n %i: %f %f %f %f \n", dice_roll, inputStart[0], inputStart[1], inputStart[2], inputStart[3]);
-    fflush(stdout);
-
-    fann_type input[4] = {1.f, 1.f, 0, 0};
-    //fann_type* output = fann_run(actor[0], input);
-    //printf("\n %f", output[0]);
-    //fflush(stdout);*/
-
-
-
-
-    /*std::vector<int> valid_moves;
-    if(dice_roll == 6){
-        for(int i = 0; i < 4; ++i){
-            if(pos_start_of_turn[i]<0){
-                valid_moves.push_back(i);
-            }
-        }
-    }
-    for(int i = 0; i < 4; ++i){
-        if(pos_start_of_turn[i]>=0 && pos_start_of_turn[i] != 99){
-            valid_moves.push_back(i);
-        }
-    }
-    if(valid_moves.size()==0){
-        for(int i = 0; i < 4; ++i){
-            if(pos_start_of_turn[i] != 99){
-                valid_moves.push_back(i);
-            }
-        }
-    }
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> piece(0, valid_moves.size()-1);
-    int select = piece(gen);
-    return valid_moves[select];*/
-
 }
 
 void acPlayer::runCritic()
@@ -404,15 +351,17 @@ void acPlayer::runCritic()
     std::cout << std::endl << vec.format(CleanFmt) << std::endl;
     fflush(stdin);*/
 
-    std::vector<float> y_j;
-    std::vector<float> a_j;
 
-    Eigen::VectorXf x(numInputs);
+    // PREVIOUS INPUTS ------------------------------------------------------------
+
+    Eigen::VectorXf prevX(numInputs);
     for(size_t i = 0; i < numInputs; ++i)
     {
-        x[i] = lastInputVec[0][i];
+        prevX[i] = prevInputVec[0][i];
     }
 
+    std::vector<float> prevY_j;
+    std::vector<float> prevA_j;
 
     for(size_t i = 0; i < midNeurons.size(); ++i)
     {
@@ -421,11 +370,49 @@ void acPlayer::runCritic()
         {
             c[j] = midNeurons[i].offsetVec[j];
         }
-        //x = x - c;
+        Eigen::VectorXf tmp = S*(prevX - c);
+        prevA_j.push_back(std::exp(-tmp.squaredNorm()));
+    }
+
+    float sum_prevA_j = 0;
+    for(auto a : prevA_j)
+    {
+        sum_prevA_j += a;
+    }
+
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        if(sum_prevA_j > 0)
+        {
+            prevY_j.push_back(prevA_j[i]/sum_prevA_j);
+        }
+        else
+        {
+            prevY_j.push_back(0);
+        }
+    }
+
+
+    // NEW INPUTS ---------------------------------------------------------------
+
+    Eigen::VectorXf x(numInputs);
+    for(size_t i = 0; i < numInputs; ++i)
+    {
+        x[i] = lastInputVec[0][i];
+    }
+
+    std::vector<float> y_j;
+    std::vector<float> a_j;
+
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        Eigen::VectorXf c(numInputs);
+        for(size_t j = 0; j < midNeurons[i].offsetVec.size(); ++j)
+        {
+            c[j] = midNeurons[i].offsetVec[j];
+        }
         Eigen::VectorXf tmp = S*(x - c);
         a_j.push_back(std::exp(-tmp.squaredNorm()));
-        //std::cout << std::endl << a_j << std::endl;
-        //fflush(stdin);
     }
 
     float sum_a_j = 0;
@@ -456,15 +443,15 @@ void acPlayer::runCritic()
     }
 
     float gaussNoise = gaussDistribution(generator);
-    epsilon = 10*gaussNoise*std::min(1.f, std::max(0.f, (V_MAX - V)/(V_MAX - V_MIN)));
+    epsilon = 10*gaussNoise*std::min(1.f, std::max(0.f, (V_MAX - prevV)/(V_MAX - V_MIN)));
 
-    float delta = reward[0] - V + prevV;
+    float delta = reward[0] + 0.1f*V - prevV;
     prevV = V;
 
     std::vector<float> dw;
     for(size_t i = 0; i < numInputs; ++i)
     {
-        dw.push_back(LEARNING_RATE*epsilon*delta*x[i]);
+        dw.push_back(LEARNING_RATE*epsilon*delta*prevX[i]);
     }
     for(size_t i = 0; i < inputWeightVec.size(); ++i)
     {
@@ -474,18 +461,18 @@ void acPlayer::runCritic()
     for(int i = 0; i < 4; ++i)
     {
 
-        //fann_set_weight(actor[i], 0, 5, inputWeightVec[0]); // inputStart
+        fann_set_weight(actor[i], 0, 5, inputWeightVec[0]); // inputStart
         fann_set_weight(actor[i], 1, 5, inputWeightVec[1]); // inputProgess
         fann_set_weight(actor[i], 2, 5, inputWeightVec[2]); // inputDangerChange
         fann_set_weight(actor[i], 3, 5, inputWeightVec[3]); // inputFinishFail
     }
-    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << " " << inputWeightVec[2] << " " << inputWeightVec[3] << "    " << V << std::endl;
+    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << " " << inputWeightVec[2] << " " << inputWeightVec[3] << "    " << delta << std::endl;
     fflush(stdin);
 
     std::vector<float> dv;
     for(size_t i = 0; i < midNeurons.size(); ++i)
     {
-        dv.push_back(LEARNING_RATE*delta*y_j[i]);
+        dv.push_back(LEARNING_RATE*delta*prevY_j[i]);
         midNeurons[i].weight += dv[i];
     }
 
@@ -497,14 +484,13 @@ void acPlayer::start_turn(positions_and_dice relative){
     if(newGame)
     {
         posStart = relative.pos;
-        newGame = false;
     }
 
     // save previous state
     std::vector<int> posStartPrev(posStart);
     posStart = relative.pos;
 
-    // give rewards
+    // REWARDS
     for(size_t i = 0; i < 4; ++i)
     {
         // first, reset in every turn
@@ -535,9 +521,9 @@ void acPlayer::start_turn(positions_and_dice relative){
 
         // punish for missing finish
         //if(posStartPrev[i] > 50 && (posStart[i] < posStartPrev[i] + diceRoll) && lastDecision == i)
-        if(inputFinishFail[i] > 0.1f && lastDecision == i)
+        /*if(inputFinishFail[i] > 0.1f && lastDecision == i)
         {
-            /*bool missedBetterChoice = false;
+            bool missedBetterChoice = false;
             for(size_t j = 0; j < 4; ++j)
             {
                 if(j == i)
@@ -551,10 +537,15 @@ void acPlayer::start_turn(positions_and_dice relative){
                 }
 
                 if(missedBetterChoice)
-                {*/
+                {
                     reward[i] += -0.1f;
                 //}
             //}
+        }*/
+
+        if(posStartPrev[i] == -1 && diceRoll == 6 && lastDecision == i)
+        {
+            reward[i] += 1.f;
         }
 
         /*if(posStart[i] == 99 && posStartPrev[i] != 99)
@@ -567,7 +558,12 @@ void acPlayer::start_turn(positions_and_dice relative){
     //fflush(stdin);
     if(!newGame)
     {
+        make_decision();
         runCritic();
+    }
+    else
+    {
+        newGame = false;
     }
 
     //lastDiceRoll = diceRoll;

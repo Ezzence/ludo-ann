@@ -48,6 +48,7 @@ private:
     std::vector<float> inputWeightVec;
 
     std::vector<float> lastInputVec[4];
+    std::vector<float> prevInputVec[4];
 
     struct fann* critic;
 

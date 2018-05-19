@@ -30,9 +30,17 @@ int ludo_player_random::make_decision(){
             }
         }
     }
-    std::uniform_int_distribution<> piece(0, valid_moves.size()-1);
-    int select = piece(gen);
-    return valid_moves[select];
+
+    if(valid_moves.size() > 0)
+    {
+        std::uniform_int_distribution<> piece(0, valid_moves.size()-1);
+        int select = piece(gen);
+        return valid_moves[select];
+    }
+    else
+    {
+        return -1;
+    }
 }
 
 void ludo_player_random::start_turn(positions_and_dice relative){
