@@ -61,8 +61,6 @@ private:
     std::normal_distribution<float> gaussDistribution;
     float epsilon; ///< result of V and random noise
 
-    float prevV;
-
     float reward[4];
 
     unsigned int numInputs;
@@ -70,6 +68,7 @@ private:
 
     int make_decision();
     void runCritic();
+    void runICO();
 
 
 public:

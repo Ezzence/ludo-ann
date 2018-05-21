@@ -2,9 +2,10 @@
 
 #define V_MAX 1.f
 #define V_MIN -1.f
-#define LEARNING_RATE 0.5f
+#define LEARNING_RATE 0.25f
+#define USE_ICO
 
-acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), prevV(0), newGame(true)
+acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
 {
 
 
@@ -94,8 +95,6 @@ acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), prevV(0), new
     S = S.inverse();
     std::cout << S << std::endl;
     fflush(stdin);
-
-    prevV = 0;
 
     numInputs = offsets.size();
 
@@ -189,24 +188,29 @@ bool acPlayer::isEnemyOnZone(int position)
 
 int acPlayer::make_decision(){
 
-    std::vector<size_t> eligible;
-
-    // set which figures are eligible to move with the current dice roll
-    for(int i = 0; i < 4; ++i)
-    {
-        if(!(posStart[i] == 99 || (posStart[i] == -1 && diceRoll != 6)))
-        {
-            eligible.push_back(i);
-        }
-    }
-
-    // save and reset lastInputVec
+    // save and reset inputs
     for(size_t i = 0; i < 4; ++i)
     {
         for(size_t j = 0; j < lastInputVec[i].size(); ++j)
         {
             prevInputVec[i][j] = lastInputVec[i][j];
             lastInputVec[i][j] = 0;
+        }
+
+        inputStart[i] = 0;
+        inputProgress[i] = 0;
+        inputDangerChange[i] = 0;
+        inputFinishFail[i] = 0;
+    }
+
+    // set which figures are eligible to move with the current dice roll
+    std::vector<size_t> eligible;
+
+    for(int i = 0; i < 4; ++i)
+    {
+        if(!(posStart[i] == 99 || (posStart[i] == -1 && diceRoll != 6)))
+        {
+            eligible.push_back(i);
         }
     }
 
@@ -392,6 +396,15 @@ void acPlayer::runCritic()
         }
     }
 
+    std::vector<float> v_j;
+    float prevV = 0;
+
+    for(size_t i = 0; i < midNeurons.size(); ++i)
+    {
+        v_j.push_back(midNeurons[i].weight);
+        prevV += v_j[i]*prevY_j[i];
+    }
+
 
     // NEW INPUTS ---------------------------------------------------------------
 
@@ -433,20 +446,17 @@ void acPlayer::runCritic()
         }
     }
 
-    std::vector<float> v_j;
     float V = 0;
 
     for(size_t i = 0; i < midNeurons.size(); ++i)
     {
-        v_j.push_back(midNeurons[i].weight);
         V += v_j[i]*y_j[i];
     }
 
     float gaussNoise = gaussDistribution(generator);
-    epsilon = 10*gaussNoise*std::min(1.f, std::max(0.f, (V_MAX - prevV)/(V_MAX - V_MIN)));
+    epsilon = gaussNoise*std::min(1.f, std::max(0.f, (V_MAX - prevV)/(V_MAX - V_MIN)));
 
     float delta = reward[0] + 0.1f*V - prevV;
-    prevV = V;
 
     std::vector<float> dw;
     for(size_t i = 0; i < numInputs; ++i)
@@ -475,6 +485,62 @@ void acPlayer::runCritic()
         dv.push_back(LEARNING_RATE*delta*prevY_j[i]);
         midNeurons[i].weight += dv[i];
     }
+
+}
+
+void acPlayer::runICO()
+{
+
+    float reflexInputs[4][4] = { {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0} }; //inputStart, inputProgress, inputDangerChange, inputFinishFail
+
+    for(size_t i = 0; i < 4; ++i)
+    {
+        if(inputStart[i] > 0 && lastDecision != i)
+        {
+            bool missedBetterChoice = true;
+            for(size_t j = 0; j < 4; ++j)
+            {
+                if(i == j)
+                {
+                    continue;
+                }
+                if(inputStart[j] > 0 && lastDecision == j)
+                {
+                    missedBetterChoice = false;
+                }
+            }
+
+            if(missedBetterChoice == true)
+            {
+                reflexInputs[i][0] = 1.f;
+                std::cout << std::endl << "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE    " << std::endl;
+
+            }
+        }
+    }
+
+
+    std::vector<float> dw;
+    for(size_t i = 0; i < numInputs; ++i)
+    {
+        dw.push_back(LEARNING_RATE*lastInputVec[1][i]*reflexInputs[1][i]);
+    }
+    for(size_t i = 0; i < inputWeightVec.size(); ++i)
+    {
+        inputWeightVec[i] += dw[i];
+    }
+
+    for(int i = 0; i < 4; ++i)
+    {
+
+        fann_set_weight(actor[i], 0, 5, inputWeightVec[0]); // inputStart
+        fann_set_weight(actor[i], 1, 5, inputWeightVec[1]); // inputProgess
+        fann_set_weight(actor[i], 2, 5, inputWeightVec[2]); // inputDangerChange
+        fann_set_weight(actor[i], 3, 5, inputWeightVec[3]); // inputFinishFail
+    }
+    std::cout << std::endl << inputWeightVec[0] << " " << inputWeightVec[1] << " " << inputWeightVec[2] << " " << inputWeightVec[3] << "    " << std::endl;
+    fflush(stdin);
+
 
 }
 
@@ -513,7 +579,7 @@ void acPlayer::start_turn(positions_and_dice relative){
                 }
             }
 
-            if(missedBetterChoice)
+            if(missedBetterChoice && inputDangerChange[i] > 0)
             {
                 reward[i] += -1.f;
             }
@@ -558,8 +624,12 @@ void acPlayer::start_turn(positions_and_dice relative){
     //fflush(stdin);
     if(!newGame)
     {
+#ifndef USE_ICO
         make_decision();
         runCritic();
+#else
+        runICO();
+#endif
     }
     else
     {
@@ -579,10 +649,6 @@ void acPlayer::post_game_analysis(std::vector<int> relative_pos){
         if(posEnd[i] < 99){
             game_complete = false;
         }
-    }
-    if(game_complete)
-    {
-        newGame = true;
     }
     emit turn_complete(game_complete);
 }
