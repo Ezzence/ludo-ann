@@ -26,21 +26,21 @@ private:
     //std::vector<int> posStartPrev;
     std::vector<int> posEnd;
     int diceRoll;
-    int lastDiceRoll;
     size_t lastDecision;
 
     struct fann* actor[4];
 
+    std::vector<size_t> eligible;
+
     fann_type inputStart[4];
 
-    fann_type inputProgress[4];
-
-    //fann_type inputDistChange[4];
-    fann_type inputFinishFail[4];
-
-    fann_type inputSafetyChange[4];
+    fann_type inputSpecialStep[4];
 
     fann_type inputDangerChange[4];
+
+    fann_type inputFinishFail[4];
+
+    fann_type inputProgress[4];
 
     /// \brief move will result in figure being hit
     fann_type inputDirectDanger[4];
@@ -68,7 +68,7 @@ private:
 
     int make_decision();
     void runCritic();
-    void runICO();
+    void runICO(std::vector<int>& prevPosStart);
 
 
 public:

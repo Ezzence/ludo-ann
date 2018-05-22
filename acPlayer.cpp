@@ -2,10 +2,10 @@
 
 #define V_MAX 1.f
 #define V_MIN -1.f
-#define LEARNING_RATE 0.25f
+#define LEARNING_RATE 0.5f
 #define USE_ICO
 
-acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
+acPlayer::acPlayer() : gaussDistribution(0, 1.f), newGame(true)
 {
 
 
@@ -27,7 +27,7 @@ acPlayer::acPlayer() : lastDiceRoll(0), gaussDistribution(0, 1.f), newGame(true)
         fann_set_weight(actor[i], 5, 6, 0);
         */
         fann_set_weight(actor[i], 0, 5, 0.f); // inputStart
-        fann_set_weight(actor[i], 1, 5, 0.f); // inputProgess
+        fann_set_weight(actor[i], 1, 5, 0.f); // inputSpecialStep
         fann_set_weight(actor[i], 2, 5, 0.f); // inputDangerChange
         fann_set_weight(actor[i], 3, 5, 0.f); // inputFinishFail
         fann_set_weight(actor[i], 4, 5, 0.f);
@@ -198,14 +198,14 @@ int acPlayer::make_decision(){
         }
 
         inputStart[i] = 0;
+        inputSpecialStep[i] = 0;
         inputProgress[i] = 0;
         inputDangerChange[i] = 0;
         inputFinishFail[i] = 0;
     }
 
     // set which figures are eligible to move with the current dice roll
-    std::vector<size_t> eligible;
-
+    eligible.clear();
     for(int i = 0; i < 4; ++i)
     {
         if(!(posStart[i] == 99 || (posStart[i] == -1 && diceRoll != 6)))
@@ -219,8 +219,9 @@ int acPlayer::make_decision(){
     for(size_t i = 0; i < eligible.size(); ++i)
     {
         int myPos = posStart[eligible[i]];
-        // initialize inputs
         inputProgress[eligible[i]] = myPos;
+
+        // CHECK START AND FINISH FAIL
         if(myPos == -1)
         {
             inputStart[eligible[i]] = 1.f;
@@ -236,6 +237,17 @@ int acPlayer::make_decision(){
         else
         {
             inputFinishFail[eligible[i]] = 0;
+        }
+
+        // CHECK SPECIAL STEP
+        std::vector<int> allStars = {5, 11, 18, 24, 31, 37, 44, 50};
+        if(std::count(allStars.begin(), allStars.end(), posStart[eligible[i]] + diceRoll) != 0)
+        {
+            inputSpecialStep[eligible[i]] = 1.f;
+        }
+        else
+        {
+            inputSpecialStep[eligible[i]] = 0;
         }
 
         // CHECK DANGER OF NEARBY ENEMY FIGURES
@@ -260,7 +272,7 @@ int acPlayer::make_decision(){
             }
             else if((pos < myPos) && (pos > (myPos - 5)))
             {
-                danger += 1; // 1 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                danger += 1;
             }
         }
         fann_type nextDanger = 0;
@@ -299,6 +311,8 @@ int acPlayer::make_decision(){
             }
         }
         inputDangerChange[eligible[i]] = nextDanger - danger;
+
+
         // -----------------------------------------------------
 
         // CHECK DIRECT DANGER (EDIT: copied to dangerChange)
@@ -319,7 +333,7 @@ int acPlayer::make_decision(){
         // -------------------------------------
 
         //fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
-        lastInputVec[eligible[i]] = {inputStart[eligible[i]], 0, inputDangerChange[eligible[i]], 0};
+        lastInputVec[eligible[i]] = {inputStart[eligible[i]], inputSpecialStep[eligible[i]], inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
         fann_type inputs[4] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
         fann_type* output = fann_run(actor[eligible[i]], inputs);
         if(eligible[i] == 0)
@@ -488,13 +502,15 @@ void acPlayer::runCritic()
 
 }
 
-void acPlayer::runICO()
+void acPlayer::runICO(std::vector<int>& prevPosStart)
 {
 
     float reflexInputs[4][4] = { {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0} }; //inputStart, inputProgress, inputDangerChange, inputFinishFail
 
     for(size_t i = 0; i < 4; ++i)
     {
+
+        // INPUT START
         if(inputStart[i] > 0 && lastDecision != i)
         {
             bool missedBetterChoice = true;
@@ -513,9 +529,62 @@ void acPlayer::runICO()
             if(missedBetterChoice == true)
             {
                 reflexInputs[i][0] = 1.f;
-                std::cout << std::endl << "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE    " << std::endl;
-
             }
+        }
+
+        // INPUT SPECIAL STEP
+        if(inputSpecialStep[i] > 0 && lastDecision == i)
+        {
+            if(eligible.size() > 1)
+            {
+                reflexInputs[i][1] = 0.01f;
+            }
+        }
+
+        // INPUT DANGER
+        if(posStart[i] == -1 && prevPosStart[i] != -1 && lastDecision == i)
+        {
+            bool missedBetterChoice = false;
+            for(auto e : eligible)
+            {
+                if(e == i)
+                {
+                    continue;
+                }
+                if(inputDangerChange[e] < inputDangerChange[i])
+                {
+                    missedBetterChoice = true;
+                }
+            }
+
+            if(missedBetterChoice)
+            {
+                reflexInputs[i][2] = -1.f;  // ADD EXTRA FOR PROGRESS LOST
+            }
+        }
+
+        // INPUT FINISH FAIL
+        if(inputFinishFail[i] > 0 && lastDecision == i)
+        {
+            bool missedBetterChoice = false;
+            for(auto e : eligible)
+            {
+                if(e == i)
+                {
+                    continue;
+                }
+                else
+                //if(inputDangerChange[e] <= 0 && inputFinishFail[e] == 0)
+                {
+                    missedBetterChoice = true;
+                }
+            }
+
+            if(missedBetterChoice)
+            {
+                reflexInputs[i][3] = -0.1f;
+            }
+
         }
     }
 
@@ -534,7 +603,7 @@ void acPlayer::runICO()
     {
 
         fann_set_weight(actor[i], 0, 5, inputWeightVec[0]); // inputStart
-        fann_set_weight(actor[i], 1, 5, inputWeightVec[1]); // inputProgess
+        fann_set_weight(actor[i], 1, 5, inputWeightVec[1]); // inputSpecialStep
         fann_set_weight(actor[i], 2, 5, inputWeightVec[2]); // inputDangerChange
         fann_set_weight(actor[i], 3, 5, inputWeightVec[3]); // inputFinishFail
     }
@@ -553,7 +622,7 @@ void acPlayer::start_turn(positions_and_dice relative){
     }
 
     // save previous state
-    std::vector<int> posStartPrev(posStart);
+    std::vector<int> prevPosStart(posStart);
     posStart = relative.pos;
 
     // REWARDS
@@ -563,7 +632,7 @@ void acPlayer::start_turn(positions_and_dice relative){
         reward[i] = 0;
 
         // punish if a figure was sent home and there could have been a better choice
-        if(posStart[i] == -1 && posStartPrev[i] != -1 && lastDecision == i)
+        if(posStart[i] == -1 && prevPosStart[i] != -1 && lastDecision == i)
         {
             bool missedBetterChoice = false;
             for(size_t j = 0; j < 4; ++j)
@@ -572,7 +641,7 @@ void acPlayer::start_turn(positions_and_dice relative){
                 {
                     continue;
                 }
-                if( (diceRoll == 6 && posStartPrev[j] == -1) || (posStartPrev[j] > -1 && posStartPrev[j] < 99 && inputDangerChange[j] < inputDangerChange[i]))     // INDEX !!!!!!!!!! (danger input)
+                if( (diceRoll == 6 && prevPosStart[j] == -1) || (prevPosStart[j] > -1 && prevPosStart[j] < 99 && inputDangerChange[j] < inputDangerChange[i]))     // INDEX !!!!!!!!!! (danger input)
                 {
                     // means another figure was available without danger
                     missedBetterChoice = true;
@@ -609,7 +678,7 @@ void acPlayer::start_turn(positions_and_dice relative){
             //}
         }*/
 
-        if(posStartPrev[i] == -1 && diceRoll == 6 && lastDecision == i)
+        if(prevPosStart[i] == -1 && diceRoll == 6 && lastDecision == i)
         {
             reward[i] += 1.f;
         }
@@ -628,7 +697,7 @@ void acPlayer::start_turn(positions_and_dice relative){
         make_decision();
         runCritic();
 #else
-        runICO();
+        runICO(prevPosStart);
 #endif
     }
     else
