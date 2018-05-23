@@ -3,7 +3,7 @@
 #define V_MAX 1.f
 #define V_MIN -1.f
 #define LEARNING_RATE 0.5f
-#define USE_ICO
+//#define USE_ICO
 
 acPlayer::acPlayer() : gaussDistribution(0, 1.f), newGame(true)
 {
@@ -241,7 +241,7 @@ int acPlayer::make_decision(){
 
         // CHECK SPECIAL STEP
         std::vector<int> allStars = {5, 11, 18, 24, 31, 37, 44, 50};
-        if(std::count(allStars.begin(), allStars.end(), posStart[eligible[i]] + diceRoll) != 0)
+        if( (std::count(allStars.begin(), allStars.end(), posStart[eligible[i]] + diceRoll) != 0) && myPos != -1)
         {
             inputSpecialStep[eligible[i]] = 1.f;
         }
@@ -334,7 +334,7 @@ int acPlayer::make_decision(){
 
         //fann_type inputs[5] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputFinishFail[eligible[i]], inputDangerChange[eligible[i]], inputDirectDanger[eligible[i]]};
         lastInputVec[eligible[i]] = {inputStart[eligible[i]], inputSpecialStep[eligible[i]], inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
-        fann_type inputs[4] = {inputStart[eligible[i]], inputProgress[eligible[i]], inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
+        fann_type inputs[4] = {inputStart[eligible[i]], inputSpecialStep[eligible[i]], inputDangerChange[eligible[i]], inputFinishFail[eligible[i]]};
         fann_type* output = fann_run(actor[eligible[i]], inputs);
         if(eligible[i] == 0)
         {
@@ -533,11 +533,25 @@ void acPlayer::runICO(std::vector<int>& prevPosStart)
         }
 
         // INPUT SPECIAL STEP
-        if(inputSpecialStep[i] > 0 && lastDecision == i)
+        if(inputSpecialStep[i] > 0 && lastDecision != i)
         {
-            if(eligible.size() > 1)
+            bool missedBetterChoice = true;
+            for(auto e : eligible)
             {
-                reflexInputs[i][1] = 0.01f;
+                if(e == i)
+                {
+                    continue;
+                }
+                else
+                if(inputDangerChange[e] < inputDangerChange[i] || inputStart[e] > 0)
+                {
+                    missedBetterChoice = false;
+                }
+            }
+
+            if(missedBetterChoice)
+            {
+                reflexInputs[i][1] = 0.1f;
             }
         }
 
