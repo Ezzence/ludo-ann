@@ -3,6 +3,7 @@
 #include <QObject>
 #include <iostream>
 #include <random>
+#include <fstream>
 #include "positions_and_dice.h"
 
 #include "floatfann.h"
@@ -45,8 +46,6 @@ private:
     /// \brief move will result in figure being hit
     fann_type inputDirectDanger[4];
 
-    std::vector<float> inputWeightVec;
-
     std::vector<float> lastInputVec[4];
     std::vector<float> prevInputVec[4];
 
@@ -59,7 +58,8 @@ private:
 
     std::default_random_engine generator;
     std::normal_distribution<float> gaussDistribution;
-    float epsilon; ///< result of V and random noise
+    float epsilon[4]; ///< result of V and random noise
+    float prevEpsilon[4];
 
     float reward[4];
 
@@ -77,7 +77,11 @@ public:
     void printMidNeurons();
     bool isEnemyOnZone(int position);
 
+    std::vector<float> inputWeightVec;
+
     bool newGame;
+    int numRuns;
+    std::ofstream logFile;
 signals:
     void select_piece(int);
     void turn_complete(bool);

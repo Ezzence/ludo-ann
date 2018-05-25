@@ -54,7 +54,7 @@ int main(int argc, char *argv[]){
     QObject::connect(&g, SIGNAL(player4_end(std::vector<int>)),    &p5,SLOT(post_game_analysis(std::vector<int>)));
     QObject::connect(&p5,SIGNAL(turn_complete(bool)),              &g, SLOT(turnComplete(bool)));
 
-    for(int i = 0; i < 10000; ++i){
+    for(int i = 0; i < 2000; ++i){
         p5.newGame = true;
         g.start();
         a.exec();
@@ -68,6 +68,8 @@ int main(int argc, char *argv[]){
             std::cout << std::endl << i << " " << (float)std::count(g.winList.begin(), g.winList.end(), j)/g.winList.size();
         }
         std::cout << std::endl;
+        p5.logFile << p5.inputWeightVec[0] << " " << p5.inputWeightVec[1] << " " << p5.inputWeightVec[2] << " " << p5.inputWeightVec[3]
+                                           << " " << (float)std::count(g.winList.begin(), g.winList.end(), 3)/g.winList.size() << std::endl;
         //fflush(stdin);
     }
     return 0;
